@@ -19,3 +19,29 @@ chroma_db/
 # OS files
 .DS_Store
 Thumbs.db
+
+
+code .gitignore
+```
+
+Replace everything in it with:
+```
+# Virtual environment
+venv/
+
+# Python cache
+__pycache__/
+*.pyc
+
+# ChromaDB data (auto-generated, don't push)
+chroma_db/
+
+# Temp files
+tmp_*.pdf
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# VS Code
+.vscode/
