@@ -74,11 +74,9 @@ def search(query_embedding, top_k=3):
             "text":        results["documents"][0][i],
             "page_number": results["metadatas"][0][i]["page_number"],
             "distance":    results["distances"][0][i],
-            # distance 0 = identical, 2 = completely opposite
-            # convert to similarity score (1 = perfect match)
             "similarity":  round(1 - results["distances"][0][i], 3)
         })
-    
+    hits = sorted(hits, key=lambda x: x["similarity"], reverse=True)
     return hits
 
 

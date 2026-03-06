@@ -1,121 +1,89 @@
-import requests
-import json
+import os
+import re
+from groq import Groq
+from dotenv import load_dotenv
+
+load_dotenv()
+
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+MODEL = "llama-3.1-8b-instant"
 
 
 def fix_query(question):
-    """
-    Fixes spelling mistakes in the query before embedding.
-    'waht are tranformers' → 'what are transformers'
-    """
-    try:
-        from spellchecker import SpellChecker
-        spell = SpellChecker()
-        
-        words = question.split()
-        corrected = []
-        
-        for word in words:
-            # get best correction
-            correction = spell.correction(word)
-            corrected.append(correction if correction else word)
-        
-        fixed = " ".join(corrected)
-        
-        # only use correction if something actually changed
-        if fixed != question:
-            print(f"  Query corrected: '{question}' → '{fixed}'")
-        
-        return fixed
-    except Exception:
-        return question  # fallback to original if anything fails
+    """Clean and normalize the query."""
+    question = question.lower().strip()
+    question = re.sub(r'[^\w\s]', '', question)
+    question = re.sub(r'\s+', ' ', question)
+    return question
+
 
 def ask_llm(question, chunks, similarity_threshold=0.4):
-    """
-    Takes a question and retrieved chunks.
-    Builds a prompt and sends to Ollama.
-    Returns the answer as a string.
-    """
+    """Generate answer using Groq + llama3."""
+
     question = fix_query(question)
-    # filter out low quality chunks
+
     good_chunks = [c for c in chunks if c["similarity"] >= similarity_threshold]
-    
+
     if not good_chunks:
         return "I couldn't find relevant information in the document to answer that question."
-    
-    # build context from chunks
+
     context = ""
-    for i, chunk in enumerate(good_chunks):
+    for chunk in good_chunks[:3]:
         context += f"[Page {chunk['page_number']}]: {chunk['text']}\n\n"
-    
-    # build the prompt
-    prompt = f"""You are a document assistant. Your ONLY job is to answer based on the context below.
 
-STRICT RULES:
-- ONLY use information from the CONTEXT below
-- If the answer is not in the context, say "I don't find that in the document"
-- Do NOT use your own knowledge
-- Do NOT make up names, dates, or facts
-- Keep answer under 3 sentences
-- Mention the page number
+    prompt = f"""You are a helpful document assistant.
+Answer the question using ONLY the context provided below.
+Be concise and accurate. Mention page numbers when possible.
+If the answer is not in the context, say "I don't find that in the document."
 
-
-CONTEXT FROM DOCUMENT:
+CONTEXT:
 {context}
 
 QUESTION: {question}
 
 ANSWER:"""
-    
-    print(f"📤 Sending to Ollama...")
-    print(f"   Using {len(good_chunks)} chunks as context")
-    
-    # call Ollama API
-    response = requests.post(
-        "http://localhost:11434/api/generate",
-        json={
-            "model":  "qwen2:0.5b",
-            "prompt": prompt,
-            "stream": False      # wait for full response
-        },
-        timeout=60
-    )
-    
-    if response.status_code == 200:
-        answer = response.json()["response"]
-        return answer.strip()
-    else:
-        return f"Ollama error: {response.status_code}"
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=300,
+            temperature=0.1
+        )
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        return f"Error: {str(e)}"
 
 
-if __name__ == "__main__":
-    from pdf_parser   import extract_text_from_pdf
-    from chunker      import chunk_text
-    from embedder     import embed_chunks, embed_query
-    from vector_store import store_chunks, search
-    
-    # full pipeline
-    print("🔄 Building index...")
-    pages  = extract_text_from_pdf("sample.pdf")
-    chunks = chunk_text(pages)
-    chunks = embed_chunks(chunks)
-    store_chunks(chunks)
-    
-    print("\n✅ Index ready! Testing questions...\n")
-    
-    # test question 1
-    q1   = "What is the attention mechanism?"
-    hits = search(embed_query(q1), top_k=3)
-    ans  = ask_llm(q1, hits)
-    
-    print("="*50)
-    print(f"Q: {q1}")
-    print(f"A: {ans}")
-    
-    # test question 2
-    q2   = "What are the main contributions of this paper?"
-    hits = search(embed_query(q2), top_k=3)
-    ans  = ask_llm(q2, hits)
-    
-    print("="*50)
-    print(f"Q: {q2}")
-    print(f"A: {ans}")
+def summarize_document(all_chunks):
+    """Summarizes the document by sampling chunks."""
+
+    total   = len(all_chunks)
+    step    = max(1, total // 8)
+    sampled = all_chunks[::step][:8]
+
+    context = ""
+    for chunk in sampled:
+        context += f"[Page {chunk['page_number']}]: {chunk['text']}\n\n"
+
+    prompt = f"""Summarize the following document excerpts in 4-5 sentences.
+Cover the main topic, key findings, and conclusions.
+Be clear and concise.
+
+DOCUMENT:
+{context}
+
+SUMMARY:"""
+
+    try:
+        response = client.chat.completions.create(
+            model=MODEL,
+            messages=[{"role": "user", "content": prompt}],
+            max_tokens=400,
+            temperature=0.3
+        )
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        return f"Error: {str(e)}"

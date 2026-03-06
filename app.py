@@ -339,6 +339,7 @@ def load_all_modules():
 
 
 # ── Session state ─────────────────────────────────────
+if "summarize" not in st.session_state: st.session_state.summarize = False
 if "chat_history" not in st.session_state:
     st.session_state.chat_history = []
 
@@ -392,16 +393,19 @@ with st.sidebar:
 
     st.markdown('<div class="sidebar-section">Actions</div>', unsafe_allow_html=True)
 
-    if st.button("🗑  Clear chat"):
-        st.session_state.chat_history = []
-        st.rerun()
+if st.session_state.indexed:
+    if st.button("📋  Summarize document"):
+        st.session_state.summarize = True
 
-    if st.button("↩  New document"):
-        st.session_state.indexed      = False
-        st.session_state.chat_history = []
-        st.session_state.last_file    = None
-        st.rerun()
+if st.button("🗑  Clear chat"):
+    st.session_state.chat_history = []
+    st.rerun()
 
+if st.button("↩  New document"):
+    st.session_state.indexed      = False
+    st.session_state.chat_history = []
+    st.session_state.last_file    = None
+    st.rerun()
 
 # ── Header ────────────────────────────────────────────
 st.markdown("""
@@ -459,6 +463,27 @@ if uploaded_file:
 
 # ── Chat ──────────────────────────────────────────────
 if st.session_state.indexed:
+
+    if st.session_state.summarize:
+        st.session_state.summarize = False
+        with st.chat_message("assistant"):
+            with st.spinner("📋 Summarizing document..."):
+                m = load_all_modules()
+                all_chunks = m["search"](
+                    m["query"]("introduction background methodology results conclusion"),
+                    top_k=8
+                )
+                from llm import summarize_document
+                summary = summarize_document(all_chunks)
+            st.write(summary)
+
+        st.session_state.chat_history.append({
+            "role":    "assistant",
+            "content": f"📋 **Document Summary:**\n\n{summary}",
+            "sources": []
+        })
+
+    
 
     for msg in st.session_state.chat_history:
         with st.chat_message(msg["role"]):
