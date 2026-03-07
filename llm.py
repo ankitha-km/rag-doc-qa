@@ -14,9 +14,8 @@ def fix_query(question):
     question = question.lower().strip()
     question = re.sub(r'[^\w\s]', '', question)
     question = re.sub(r'\s+', ' ', question)
-    # normalize is/are variations
-    question = question.replace("what is ", "what are ")
-    question = question.replace("what's ", "what are ")
+    # remove question words that confuse embeddings
+    question = re.sub(r'^(what (is|are|was|were)|who is|how does|explain|tell me about)\s+', '', question)
     return question
 
 def ask_llm(question, chunks, similarity_threshold=0.2):
