@@ -32,9 +32,10 @@ def ask_llm(question, chunks, similarity_threshold=0.2):
         context += f"[Page {chunk['page_number']}]: {chunk['text']}\n\n"
 
     prompt = f"""You are a helpful document assistant.
-Answer the question using the context below. The question and context may use slightly different words (e.g. singular/plural, capitalization) - that is fine, still answer.
+Answer the question using the context below.
+The question and context may use slightly different words - that is fine, still answer based on the context.
 Be concise and accurate. Mention page numbers when possible.
-Only say "I don't find that in the document" if the context is completely unrelated to the question.
+Never say you cannot find something if the context is about the same general topic.
 
 CONTEXT:
 {context}
