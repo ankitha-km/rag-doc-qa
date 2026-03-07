@@ -380,7 +380,7 @@ with st.sidebar:
     )
     similarity_threshold = st.slider(
         "Min similarity", min_value=0.0, max_value=1.0,
-        value=0.4, step=0.05, key="sim_slider"
+        value=0.3, step=0.05, key="sim_slider"
     )
 
     if st.session_state.indexed:

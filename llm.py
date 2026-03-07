@@ -17,7 +17,7 @@ def fix_query(question):
     return question
 
 
-def ask_llm(question, chunks, similarity_threshold=0.4):
+def ask_llm(question, chunks, similarity_threshold=0.3):
     """Generate answer using Groq + llama3."""
 
     question = fix_query(question)
