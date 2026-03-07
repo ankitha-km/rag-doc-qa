@@ -14,8 +14,10 @@ def fix_query(question):
     question = question.lower().strip()
     question = re.sub(r'[^\w\s]', '', question)
     question = re.sub(r'\s+', ' ', question)
+    # normalize is/are variations
+    question = question.replace("what is ", "what are ")
+    question = question.replace("what's ", "what are ")
     return question
-
 
 def ask_llm(question, chunks, similarity_threshold=0.2):
     """Generate answer using Groq + llama3."""
