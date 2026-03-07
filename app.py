@@ -512,7 +512,21 @@ if st.session_state.indexed:
         with st.chat_message("assistant"):
             with st.spinner("Searching..."):
                 m    = load_all_modules()
-                hits = m["search"](m["query"](question), top_k=top_k)
+                q1 = m["query"](question)
+                q2 = m["query"](question.rstrip("s"))
+                q3 = m["query"](question + "s")
+
+                r1 = m["search"](q1, top_k=top_k)
+                r2 = m["search"](q2, top_k=top_k)
+                r3 = m["search"](q3, top_k=top_k)
+
+                seen = {}
+                for hit in r1 + r2 + r3:
+                    key = hit["text"][:50]
+                    if key not in seen or hit["similarity"] > seen[key]["similarity"]:
+                        seen[key] = hit
+
+                hits = sorted(seen.values(), key=lambda x: x["similarity"], reverse=True)[:top_k]
             with st.spinner("Thinking..."):
                 answer = m["ask"](question, hits, similarity_threshold)
 
