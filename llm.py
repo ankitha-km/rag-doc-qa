@@ -34,7 +34,8 @@ def ask_llm(question, chunks, similarity_threshold=0.2):
     prompt = f"""You are a helpful document assistant.
 Answer the question using ONLY the context provided below.
 Be concise and accurate. Mention page numbers when possible.
-If the answer is not in the context, say "I don't find that in the document."
+If the context is about the same topic as the question (even if wording differs), answer based on it.
+Only say "I don't find that in the document" if the context is completely unrelated."
 
 CONTEXT:
 {context}
