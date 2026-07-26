@@ -16,7 +16,7 @@ def fix_query(question):
     question = re.sub(r'\s+', ' ', question)
     # remove question words that confuse embeddings
     question = re.sub(r'^(what (is|are|was|were)|who is|how does|explain|tell me about)\s+', '', question)
-    return question
+    return question 
 
 def ask_llm(question, chunks, similarity_threshold=0.2):
     """Generate answer using Groq + llama3."""
@@ -33,10 +33,10 @@ def ask_llm(question, chunks, similarity_threshold=0.2):
         context += f"[Page {chunk['page_number']}]: {chunk['text']}\n\n"
 
     prompt = f"""You are a helpful document assistant.
-Answer the question using the context below.
-The question and context may use slightly different words - that is fine, still answer based on the context.
+Answer the question using ONLY the context below.
+Do not use any outside knowledge, even if you think you know the answer.
+If the exact answer is not in the context, say "The document doesn't clearly state this" rather than guessing.
 Be concise and accurate. Mention page numbers when possible.
-Never say you cannot find something if the context is about the same general topic.
 
 CONTEXT:
 {context}
