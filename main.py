@@ -16,6 +16,7 @@ import os
 import tempfile
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
 
@@ -24,12 +25,13 @@ from chunker import chunk_text
 from embedder import embed_chunks, embed_query
 from vector_store import store_chunks, search, get_count
 from llm import ask_llm, summarize_document
-from database import init_db, get_db, Document, Query as QueryModel
+from database import init_db, get_db, Document, Query as QueryModel, User
+from auth import hash_password, verify_password, create_access_token, get_current_user
 
 app = FastAPI(
     title="DocMind API",
     description="Upload a PDF, then ask questions about it — RAG over your own documents.",
-    version="0.2.0",
+    version="0.3.0",
 )
 
 
@@ -38,10 +40,20 @@ def on_startup():
     init_db()
 
 
-# ── Tracks which document is "active" for the /query and /summarize routes.
-#    Still single-document-at-a-time for v1 — the DB stores full history
-#    regardless, this just points at the most recently uploaded one. ──
-_active_document_id: int | None = None
+# ── Tracks which document is "active" for /query and /summarize, per user.
+#    Still single-active-document-per-user for v1 — full history is in the
+#    DB regardless, this just points at each user's most recent upload. ──
+_active_document_by_user: dict[int, int] = {}
+
+
+class RegisterRequest(BaseModel):
+    username: str = Field(..., min_length=3, max_length=50)
+    password: str = Field(..., min_length=6)
+
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str = "bearer"
 
 
 # ── Request/response schemas ─────────────────────────────────────────────
@@ -90,11 +102,38 @@ class StatsResponse(BaseModel):
 
 
 # ── Routes ────────────────────────────────────────────────────────────────
-@app.post("/documents/upload", response_model=UploadResponse)
-async def upload_document(file: UploadFile = File(...), db: Session = Depends(get_db)):
-    """Upload a PDF, extract + chunk + embed + store it, and make it the active document for queries."""
-    global _active_document_id
+@app.post("/auth/register", response_model=TokenResponse)
+async def register(req: RegisterRequest, db: Session = Depends(get_db)):
+    """Create a new user and return a token immediately (auto-login on signup)."""
+    existing = db.query(User).filter(User.username == req.username).first()
+    if existing:
+        raise HTTPException(status_code=400, detail="Username already taken")
 
+    user = User(username=req.username, hashed_password=hash_password(req.password))
+    db.add(user)
+    db.commit()
+    db.refresh(user)
+
+    return TokenResponse(access_token=create_access_token(user.username))
+
+
+@app.post("/auth/login", response_model=TokenResponse)
+async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+    """Swagger's 'Authorize' button posts here as form data (not JSON) — that's what OAuth2PasswordRequestForm expects."""
+    user = db.query(User).filter(User.username == form_data.username).first()
+    if not user or not verify_password(form_data.password, user.hashed_password):
+        raise HTTPException(status_code=401, detail="Incorrect username or password")
+
+    return TokenResponse(access_token=create_access_token(user.username))
+
+
+@app.post("/documents/upload", response_model=UploadResponse)
+async def upload_document(
+    file: UploadFile = File(...),
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Upload a PDF, extract + chunk + embed + store it, and make it the active document for this user's queries."""
     if file.content_type != "application/pdf":
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
@@ -113,19 +152,24 @@ async def upload_document(file: UploadFile = File(...), db: Session = Depends(ge
     finally:
         os.unlink(tmp_path)
 
-    doc = Document(filename=file.filename, pages=len(pages), chunks=len(chunks))
+    doc = Document(owner_id=current_user.id, filename=file.filename, pages=len(pages), chunks=len(chunks))
     db.add(doc)
     db.commit()
     db.refresh(doc)
 
-    _active_document_id = doc.id
+    _active_document_by_user[current_user.id] = doc.id
     return UploadResponse(document_id=doc.id, filename=doc.filename, pages=doc.pages, chunks=doc.chunks)
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query_document(req: QueryRequest, db: Session = Depends(get_db)):
-    """Ask a question about the currently active document. Saves the Q&A to that document's history."""
-    if get_count() == 0 or _active_document_id is None:
+async def query_document(
+    req: QueryRequest,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Ask a question about the current user's active document. Saves the Q&A to that document's history."""
+    active_document_id = _active_document_by_user.get(current_user.id)
+    if get_count() == 0 or active_document_id is None:
         raise HTTPException(status_code=400, detail="No document indexed yet — upload one first")
 
     q_embedding = embed_query(req.question)
@@ -133,7 +177,7 @@ async def query_document(req: QueryRequest, db: Session = Depends(get_db)):
     answer = ask_llm(req.question, hits, req.similarity_threshold)
 
     db.add(QueryModel(
-        document_id=_active_document_id,
+        document_id=active_document_id,
         question=req.question,
         answer=answer,
         top_k=req.top_k,
@@ -146,9 +190,9 @@ async def query_document(req: QueryRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/summarize", response_model=SummaryResponse)
-async def summarize():
-    """Summarize the currently indexed document."""
-    if get_count() == 0:
+async def summarize(current_user: User = Depends(get_current_user)):
+    """Summarize the current user's active document."""
+    if get_count() == 0 or current_user.id not in _active_document_by_user:
         raise HTTPException(status_code=400, detail="No document indexed yet — upload one first")
 
     q_embedding = embed_query("introduction background methodology results conclusion")
@@ -158,22 +202,27 @@ async def summarize():
 
 
 @app.get("/documents/stats", response_model=StatsResponse)
-async def document_stats(db: Session = Depends(get_db)):
-    """Quick check: is a document indexed, and what's the active one."""
-    count = get_count()
-    active = db.query(Document).filter(Document.id == _active_document_id).first() if _active_document_id else None
+async def document_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """Quick check: is a document indexed, and what's the active one for this user."""
+    active_id = _active_document_by_user.get(current_user.id)
+    active = db.query(Document).filter(Document.id == active_id).first() if active_id else None
     return StatsResponse(
-        indexed=count > 0,
+        indexed=active is not None,
         pages=active.pages if active else 0,
-        chunks=count,
+        chunks=get_count(),
         filename=active.filename if active else None,
     )
 
 
 @app.get("/documents", response_model=list[DocumentSummary])
-async def list_documents(db: Session = Depends(get_db)):
-    """All documents ever uploaded, most recent first."""
-    docs = db.query(Document).order_by(Document.created_at.desc()).all()
+async def list_documents(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+    """This user's documents, most recent first."""
+    docs = (
+        db.query(Document)
+        .filter(Document.owner_id == current_user.id)
+        .order_by(Document.created_at.desc())
+        .all()
+    )
     return [
         DocumentSummary(
             id=d.id, filename=d.filename, pages=d.pages, chunks=d.chunks,
@@ -184,11 +233,17 @@ async def list_documents(db: Session = Depends(get_db)):
 
 
 @app.get("/documents/{document_id}/history", response_model=list[HistoryEntry])
-async def document_history(document_id: int, db: Session = Depends(get_db)):
-    """Every question asked against a specific document, oldest first."""
+async def document_history(
+    document_id: int,
+    db: Session = Depends(get_db),
+    current_user: User = Depends(get_current_user),
+):
+    """Every question asked against a specific document, oldest first — only if you own it."""
     doc = db.query(Document).filter(Document.id == document_id).first()
     if not doc:
         raise HTTPException(status_code=404, detail="Document not found")
+    if doc.owner_id != current_user.id:
+        raise HTTPException(status_code=403, detail="Not your document")
 
     return [
         HistoryEntry(id=q.id, question=q.question, answer=q.answer, created_at=q.created_at.isoformat())
