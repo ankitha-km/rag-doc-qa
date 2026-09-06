@@ -16,6 +16,7 @@ import os
 import tempfile
 
 from fastapi import FastAPI, UploadFile, File, HTTPException, Depends
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import OAuth2PasswordRequestForm
 from sqlalchemy.orm import Session
 from pydantic import BaseModel, Field
@@ -32,6 +33,16 @@ app = FastAPI(
     title="DocMind API",
     description="Upload a PDF, then ask questions about it — RAG over your own documents.",
     version="0.3.0",
+)
+
+# Allows the standalone frontend (served from a different origin/port) to call this API.
+# Wide open for local development — if you ever deploy this for real, replace "*" with
+# your actual frontend URL.
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["https://rag-docmind.netlify.app"],
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 
