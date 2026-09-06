@@ -114,7 +114,7 @@ class StatsResponse(BaseModel):
 
 # ── Routes ────────────────────────────────────────────────────────────────
 @app.post("/auth/register", response_model=TokenResponse)
-async def register(req: RegisterRequest, db: Session = Depends(get_db)):
+def register(req: RegisterRequest, db: Session = Depends(get_db)):
     """Create a new user and return a token immediately (auto-login on signup)."""
     existing = db.query(User).filter(User.username == req.username).first()
     if existing:
@@ -129,7 +129,7 @@ async def register(req: RegisterRequest, db: Session = Depends(get_db)):
 
 
 @app.post("/auth/login", response_model=TokenResponse)
-async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
+def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = Depends(get_db)):
     """Swagger's 'Authorize' button posts here as form data (not JSON) — that's what OAuth2PasswordRequestForm expects."""
     user = db.query(User).filter(User.username == form_data.username).first()
     if not user or not verify_password(form_data.password, user.hashed_password):
@@ -139,7 +139,7 @@ async def login(form_data: OAuth2PasswordRequestForm = Depends(), db: Session = 
 
 
 @app.post("/documents/upload", response_model=UploadResponse)
-async def upload_document(
+def upload_document(
     file: UploadFile = File(...),
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -149,7 +149,7 @@ async def upload_document(
         raise HTTPException(status_code=400, detail="Only PDF files are supported")
 
     with tempfile.NamedTemporaryFile(delete=False, suffix=".pdf") as tmp:
-        tmp.write(await file.read())
+        tmp.write(file.file.read())
         tmp_path = tmp.name
 
     try:
@@ -173,7 +173,7 @@ async def upload_document(
 
 
 @app.post("/query", response_model=QueryResponse)
-async def query_document(
+def query_document(
     req: QueryRequest,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -201,7 +201,7 @@ async def query_document(
 
 
 @app.post("/summarize", response_model=SummaryResponse)
-async def summarize(current_user: User = Depends(get_current_user)):
+def summarize(current_user: User = Depends(get_current_user)):
     """Summarize the current user's active document."""
     if get_count() == 0 or current_user.id not in _active_document_by_user:
         raise HTTPException(status_code=400, detail="No document indexed yet — upload one first")
@@ -213,7 +213,7 @@ async def summarize(current_user: User = Depends(get_current_user)):
 
 
 @app.get("/documents/stats", response_model=StatsResponse)
-async def document_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def document_stats(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """Quick check: is a document indexed, and what's the active one for this user."""
     active_id = _active_document_by_user.get(current_user.id)
     active = db.query(Document).filter(Document.id == active_id).first() if active_id else None
@@ -226,7 +226,7 @@ async def document_stats(db: Session = Depends(get_db), current_user: User = Dep
 
 
 @app.get("/documents", response_model=list[DocumentSummary])
-async def list_documents(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
+def list_documents(db: Session = Depends(get_db), current_user: User = Depends(get_current_user)):
     """This user's documents, most recent first."""
     docs = (
         db.query(Document)
@@ -244,7 +244,7 @@ async def list_documents(db: Session = Depends(get_db), current_user: User = Dep
 
 
 @app.get("/documents/{document_id}/history", response_model=list[HistoryEntry])
-async def document_history(
+def document_history(
     document_id: int,
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
@@ -263,5 +263,5 @@ async def document_history(
 
 
 @app.get("/health")
-async def health():
+def health():
     return {"status": "ok"}
