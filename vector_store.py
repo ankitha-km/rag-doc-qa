@@ -1,20 +1,28 @@
-import chromadb
-
-# Persistent client — data survives across restarts, stored on disk
+# Persistent client — data survives across restarts, stored on disk.
+# Created lazily on first use (not at import time) so importing this module
+# is instant — chromadb client setup does real disk I/O, which is too slow
+# to happen during app startup on constrained hosting.
 CHROMA_PATH = "/tmp/docmind_chroma"
-_client = chromadb.PersistentClient(path=CHROMA_PATH)
+_client = None
+_collection = None
 
-# get_or_create so re-imports don't blow up if the collection already exists
-_collection = _client.get_or_create_collection(
-    name="docmind_chunks",
-    metadata={"hnsw:space": "cosine"}  # match your old cosine-similarity behavior
-)
+
+def _get_collection():
+    global _client, _collection
+    if _collection is None:
+        import chromadb  # deferred: chromadb itself is a heavier import
+        _client = chromadb.PersistentClient(path=CHROMA_PATH)
+        _collection = _client.get_or_create_collection(
+            name="docmind_chunks",
+            metadata={"hnsw:space": "cosine"}  # match your old cosine-similarity behavior
+        )
+    return _collection
 
 
 def store_chunks(chunks):
     """Replaces all existing chunks with the new set (matches old overwrite behavior)."""
-    # Clear existing data — Chroma has no "truncate", so delete + recreate
     global _collection
+    collection = _get_collection()
     _client.delete_collection("docmind_chunks")
     _collection = _client.get_or_create_collection(
         name="docmind_chunks",
@@ -35,11 +43,12 @@ def store_chunks(chunks):
 
 
 def search(query_embedding, top_k=5):
-    count = _collection.count()
+    collection = _get_collection()
+    count = collection.count()
     if count == 0:
         return []
 
-    results = _collection.query(
+    results = collection.query(
         query_embeddings=[query_embedding],
         n_results=min(top_k, count)
     )
@@ -63,4 +72,4 @@ def search(query_embedding, top_k=5):
 
 
 def get_count():
-    return _collection.count()
+    return _get_collection().count()

@@ -1,13 +1,13 @@
-from sentence_transformers import SentenceTransformer
-
 # ── module-level cache ────────────────────────────────
-# This loads ONCE when the module is first imported
-# and never again for the entire session
+# This loads ONCE, on the first real request that needs it — not at
+# import time. Keeps app startup fast (important on constrained hosting
+# where startup has a much shorter timeout than a request does).
 _model = None
 
 def get_model():
     global _model
     if _model is None:
+        from sentence_transformers import SentenceTransformer  # deferred: heavy import (pulls in torch)
         print("⏳ Loading embedding model for the first time...")
         _model = SentenceTransformer("all-MiniLM-L6-v2")
         print("✅ Model cached in memory!")
