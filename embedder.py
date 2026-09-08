@@ -25,7 +25,10 @@ def embed_chunks(chunks):
     model = get_model()  # instant after first call
 
     texts = [chunk["text"] for chunk in chunks]
-    embeddings = list(model.embed(texts))  # fastembed returns a generator of numpy arrays
+    # Small batch_size caps peak memory during embedding — important on
+    # constrained free-tier hosting where a large document (many chunks)
+    # embedded all at once can spike past the RAM ceiling.
+    embeddings = list(model.embed(texts, batch_size=8))
 
     for i, chunk in enumerate(chunks):
         chunk["embedding"] = embeddings[i].tolist()
