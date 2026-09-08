@@ -11,12 +11,14 @@ queryable later (e.g. for an analytics dashboard, or just to show in an intervie
 that you understand relational modeling).
 """
 
+import os
 from datetime import datetime, timezone
 
 from sqlalchemy import create_engine, Column, Integer, String, Text, Float, DateTime, ForeignKey
 from sqlalchemy.orm import declarative_base, relationship, sessionmaker, Session
 
-DATABASE_URL = "sqlite:///./docmind.db"
+# Overridable so tests can point at a throwaway DB instead of your real docmind.db
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./docmind.db")
 
 # check_same_thread=False is needed because FastAPI can use SQLite from
 # multiple threads within one process — safe for our single-writer use case
